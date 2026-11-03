@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Kids Vocab Game - เกม AR ฝึกพูดภาษาอังกฤษ</title>
+    
+    <!-- Google Fonts: Mitr -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        mitr: ['Mitr', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Canvas Confetti CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <!-- MediaPipe Face Mesh CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Mitr', sans-serif;
+            user-select: none;
+        }
+        
+        /* Glassmorphic card design */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.45);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+        }
+        
+        /* Mirror effect for camera canvas */
+        .mirror {
+            transform: scaleX(-1);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden bg-gradient-to-br from-pink-300 via-orange-200 to-amber-200 text-slate-800">
+
+    <!-- App Container -->
+    <div class="h-full w-full flex flex-col md:flex-row p-4 gap-4 relative">
+        
+        <!-- ================= ฝั่งซ้าย: UI เกมเพลย์ ================= -->
+        <div class="w-full md:w-1/2 h-1/2 md:h-full flex flex-col justify-between p-6 rounded-3xl glass-panel shadow-2xl relative overflow-hidden z-10">
+            
+            <!-- Header: ข้อปัจจุบัน และ คะแนน -->
+            <div class="flex justify-between items-center">
+                <div class="bg-white/80 px-5 py-2 rounded-full font-semibold text-lg shadow-sm text-pink-600 border border-pink-200">
+                    ข้อที่ <span id="current-question-text">1</span> / <span id="total-questions-text">10</span>
+                </div>
+                <div class="bg-amber-400 text-white px-6 py-2 rounded-full font-bold text-xl shadow-md border-2 border-amber-300 flex items-center gap-2">
+                    <span>⭐ คะแนน:</span>
+                    <span id="score-text">0</span>
+                </div>
+            </div>
+
+            <!-- Main Content: คำศัพท์ & คำแปล -->
+            <div class="flex flex-col items-center justify-center my-auto text-center space-y-3">
+                <!-- Status Badge -->
+                <div id="status-badge" class="px-6 py-2 rounded-full text-base font-medium shadow-sm transition-all duration-300 bg-amber-100 text-amber-700 border border-amber-300">
+                    เตรียมตัว...
+                </div>
+                
+                <!-- English Vocabulary -->
+                <h1 id="vocab-word" class="text-6xl md:text-8xl font-black text-pink-600 drop-shadow-md tracking-wide">
+                    Apple
+                </h1>
+                
+                <!-- Thai Translation -->
+                <p id="vocab-translation" class="text-2xl md:text-3xl font-medium text-slate-600">
+                    แอปเปิ้ล
+                </p>
+
+                <!-- Audio Output Feedback / Recognized Speech -->
+                <div class="h-10 flex items-center justify-center">
+                    <p id="speech-recognized" class="text-lg font-medium text-purple-600 bg-white/60 px-4 py-1 rounded-xl border border-purple-200 shadow-inner hidden">
+                        กำลังฟัง...
+                    </p>
+                </div>
+            </div>
+
+            <!-- Footer: Meter Bar & Feedback -->
+            <div class="space-y-2">
+                <div class="flex justify-between items-center text-sm font-semibold text-slate-700">
+                    <span>เปอร์เซ็นต์ความแม่นยำ</span>
+                    <span id="accuracy-text" class="text-base font-bold">0%</span>
+                </div>
+                
+                <!-- Progress Meter Bar -->
+                <div class="w-full h-6 bg-slate-200/80 rounded-full overflow-hidden p-1 shadow-inner border border-white">
+                    <div id="meter-bar" class="h-full w-0% bg-gradient-to-r from-emerald-400 to-green-500 rounded-full transition-all duration-500 shadow-sm"></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ================= ฝั่งขวา: กล้อง & AR Canvas ================= -->
+        <div class="w-full md:w-1/2 h-1/2 md:h-full relative rounded-3xl overflow-hidden shadow-2xl border-4 border-white/80 bg-slate-900">
+            <!-- Hidden Input Video Stream -->
+            <video id="webcam" class="hidden" playsinline muted></video>
+            
+            <!-- Output Canvas for Video + AR overlay -->
+            <canvas id="output-canvas" class="w-full h-full object-cover mirror"></canvas>
+            
+            <!-- Floating Indicator on Camera View -->
+            <div id="camera-overlay-badge" class="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-2 border border-white/20">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                AR Face Tracking Active
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ================= Overlay 1: Start Screen ================= -->
+    <div id="start-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4">
+        <div class="bg-white rounded-3xl p-8 md:p-10 max-w-md w-full text-center space-y-6 shadow-2xl border-4 border-pink-300">
+            <div class="text-6xl animate-bounce">👑</div>
+            <h2 class="text-3xl font-bold text-pink-600">เกม AR ฝึกพูดคำศัพท์</h2>
+            <p class="text-slate-600 text-base leading-relaxed">
+                มาฝึกพูดภาษาอังกฤษสนุกๆ กันเลย! <br/>
+                กรุณากดเปิดกล้องและไมโครโฟนเพื่อเริ่มต้นเล่นเกม
+            </p>
+            <button id="btn-start" class="w-full py-4 bg-gradient-to-r from-pink-500 to-amber-500 hover:from-pink-600 hover:to-amber-600 text-white font-bold text-xl rounded-2xl shadow-lg transform active:scale-95 transition">
+                🚀 เริ่มต้นเล่นเกม!
+            </button>
+        </div>
+    </div>
+
+    <!-- ================= Overlay 2: End Screen ================= -->
+    <div id="end-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/85 backdrop-blur-md p-4 hidden">
+        <div class="bg-white rounded-3xl p-8 md:p-10 max-w-md w-full text-center space-y-6 shadow-2xl border-4 border-amber-400 transform transition-all">
+            <div id="end-emoji" class="text-7xl">🎉</div>
+            <h2 id="end-title" class="text-3xl font-bold text-slate-800">เก่งมาก!</h2>
+            
+            <div class="bg-amber-50 p-6 rounded-2xl border border-amber-200">
+                <p class="text-slate-500 text-sm font-medium mb-1">คะแนนที่คุณทำได้</p>
+                <div class="text-5xl font-black text-pink-600">
+                    <span id="final-score">0</span> <span class="text-2xl text-slate-400 font-normal">/ 10</span>
+                </div>
+            </div>
+            
+            <p id="end-message" class="text-slate-600 font-medium text-base">
+                ยอดเยี่ยมเลย! ลองเล่นอีกครั้งเพื่อเก็บคะแนนเต็มนะ
+            </p>
+
+            <button id="btn-restart" class="w-full py-4 bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-xl rounded-2xl shadow-lg transform active:scale-95 transition">
+                🔄 เล่นใหม่อีกครั้ง
+            </button>
+        </div>
+    </div>
+
+    <!-- ================= JavaScript Logic ================= -->
+    <script>
+        // ================= Global State & Constants =================
+        const VOCAB_LIST = [
+            { en: 'Apple', th: 'แอปเปิ้ล' },
+            { en: 'Banana', th: 'กล้วย' },
+            { en: 'Cat', th: 'แมว' },
+            { en: 'Dog', th: 'สุนัข' },
+            { en: 'Elephant', th: 'ช้าง' },
+            { en: 'Fish', th: 'ปลา' },
+            { en: 'Giraffe', th: 'ยีราฟ' },
+            { en: 'House', th: 'บ้าน' },
+            { en: 'Ice cream', th: 'ไอศกรีม' },
+            { en: 'Tiger', th: 'เสือ' }
+        ];
+
+        let currentIndex = 0;
+        let score = 0;
+        let isListening = false;
+        let currentARState = 'none'; // 'none' | 'crown' | 'horns'
+        let faceLandmarks = null;
+        let audioCtx = null;
+        let recognition = null;
+        let speechTimeout = null;
+        let faceMesh = null;
+        let camera = null;
+
+        // DOM Elements
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        const currentQuestionEl = document.getElementById('current-question-text');
+        const totalQuestionsEl = document.getElementById('total-questions-text');
+        const scoreEl = document.getElementById('score-text');
+        const vocabWordEl = document.getElementById('vocab-word');
+        const vocabTranslationEl = document.getElementById('vocab-translation');
+        const statusBadgeEl = document.getElementById('status-badge');
+        const speechRecognizedEl = document.getElementById('speech-recognized');
+        const meterBarEl = document.getElementById('meter-bar');
+        const accuracyTextEl = document.getElementById('accuracy-text');
+
+        const startScreenEl = document.getElementById('start-screen');
+        const endScreenEl = document.getElementById('end-screen');
+        const btnStart = document.getElementById('btn-start');
+        const btnRestart = document.getElementById('btn-restart');
+
+        // ================= 1. Web Audio API Synthesizer =================
+        function initAudioContext() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(type) {
+            try {
+                initAudioContext();
+                const now = audioCtx.currentTime;
+
+                if (type === 'click') {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(600, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.linearRampToValueAtTime(0.01, now + 0.05);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.05);
+                } 
+                else if (type === 'tick') {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(440, now);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.08);
+                } 
+                else if (type === 'go') {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(880, now);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } 
+                else if (type === 'correct') {
+                    // Ping-pong cheerful chime
+                    [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+                        gain.gain.setValueAtTime(0.2, now + idx * 0.08);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.2);
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start(now + idx * 0.08);
+                        osc.stop(now + idx * 0.08 + 0.2);
+                    });
+                } 
+                else if (type === 'wrong') {
+                    // Low Buzzer
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.setValueAtTime(120, now + 0.15);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.linearRampToValueAtTime(0.01, now + 0.35);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.35);
+                } 
+                else if (type === 'warning') {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(330, now);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                }
+                else if (type === 'fanfare') {
+                    const notes = [523.25, 659.25, 783.99, 1046.50, 880, 1046.50];
+                    const times = [0, 0.15, 0.3, 0.45, 0.6, 0.75];
+                    const durations = [0.12, 0.12, 0.12, 0.12, 0.12, 0.4];
+                    notes.forEach((freq, idx) => {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(freq, now + times[idx]);
+                        gain.gain.setValueAtTime(0.3, now + times[idx]);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + times[idx] + durations[idx]);
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start(now + times[idx]);
+                        osc.stop(now + times[idx] + durations[idx]);
+                    });
+                }
+                else if (type === 'gameover') {
+                    const notes = [400, 350, 300, 250];
+                    notes.forEach((freq, idx) => {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.type = 'sawtooth';
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.15);
+                        gain.gain.setValueAtTime(0.25, now + idx * 0.15);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.15 + 0.2);
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start(now + idx * 0.15);
+                        osc.stop(now + idx * 0.15 + 0.2);
+                    });
+                }
+            } catch (err) {
+                console.error("Audio error:", err);
+            }
+        }
+
+        // ================= 2. Levenshtein Distance & Similarity =================
+        function calculateSimilarity(str1, str2) {
+            const s1 = str1.toLowerCase().trim();
+            const s2 = str2.toLowerCase().trim();
+            
+            if (s1 === s2) return 1.0;
+            if (!s1 || !s2) return 0.0;
+
+            const track = Array(s2.length + 1).fill(null).map(() =>
+                Array(s1.length + 1).fill(null));
+
+            for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
+            for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
+
+            for (let j = 1; j <= s2.length; j += 1) {
+                for (let i = 1; i <= s1.length; i += 1) {
+                    const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
+                    track[j][i] = Math.min(
+                        track[j][i - 1] + 1, // insertion
+                        track[j - 1][i] + 1, // deletion
+                        track[j - 1][i - 1] + indicator // substitution
+                    );
+                }
+            }
+
+            const distance = track[s2.length][s1.length];
+            const maxLength = Math.max(s1.length, s2.length);
+            return (maxLength - distance) / maxLength;
+        }
+
+        // ================= 3. Web Speech API Setup =================
+        function setupSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            if (!SpeechRecognition) {
+                alert("เบราว์เซอร์ของคุณไม่รองรับ Web Speech API กรุณาใช้งานผ่าน Google Chrome หรือ Microsoft Edge");
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    transcript += event.results[i][0].transcript;
+                }
+                
+                speechRecognizedEl.classList.remove('hidden');
+                speechRecognizedEl.innerText = `🗣️ "${transcript}"`;
+
+                if (event.results[0].isFinal) {
+                    processSpeechResult(transcript);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.warn("Speech Recognition Error:", event.error);
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+            };
+        }
+
+        // ================= 4. MediaPipe Face Mesh & AR Drawing =================
+        function setupMediaPipe() {
+            faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            faceMesh.onResults(onFaceMeshResults);
+
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await faceMesh.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+        }
+
+        function onFaceMeshResults(results) {
+            // Set canvas size to match video dimensions dynamically
+            canvasElement.width = videoElement.videoWidth || 640;
+            canvasElement.height = videoElement.videoHeight || 480;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Draw original camera feed
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                faceLandmarks = results.multiFaceLandmarks[0];
+
+                if (currentARState === 'crown') {
+                    drawCrown(canvasCtx, faceLandmarks, canvasElement.width, canvasElement.height);
+                } else if (currentARState === 'horns') {
+                    drawHorns(canvasCtx, faceLandmarks, canvasElement.width, canvasElement.height);
+                    drawVignette(canvasCtx, canvasElement.width, canvasElement.height);
+                }
+            } else {
+                faceLandmarks = null;
+            }
+
+            canvasCtx.restore();
+        }
+
+        // Draw 2D Golden Crown on forehead
+        function drawCrown(ctx, landmarks, width, height) {
+            // Key forehead landmark (10 = top center forehead)
+            const topHead = landmarks[10];
+            const leftTemple = landmarks[127];
+            const rightTemple = landmarks[356];
+
+            const x = topHead.x * width;
+            const y = topHead.y * height - (height * 0.08); // Shift up slightly
+            const headWidth = Math.abs(rightTemple.x - leftTemple.x) * width * 1.2;
+            const crownHeight = headWidth * 0.6;
+
+            ctx.save();
+            ctx.translate(x, y);
+
+            // Draw Crown Path
+            ctx.beginPath();
+            ctx.moveTo(-headWidth / 2, 0);
+            ctx.lineTo(-headWidth / 2, -crownHeight * 0.7);
+            ctx.lineTo(-headWidth / 4, -crownHeight * 0.35);
+            ctx.lineTo(0, -crownHeight); // Center peak
+            ctx.lineTo(headWidth / 4, -crownHeight * 0.35);
+            ctx.lineTo(headWidth / 2, -crownHeight * 0.7);
+            ctx.lineTo(headWidth / 2, 0);
+            ctx.closePath();
+
+            // Gold Gradient Fill
+            const grad = ctx.createLinearGradient(0, -crownHeight, 0, 0);
+            grad.addColorStop(0, '#FCD34D'); // Amber 300
+            grad.addColorStop(0.5, '#F59E0B'); // Amber 500
+            grad.addColorStop(1, '#B45309'); // Amber 700
+
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.stroke();
+
+            // Crown Jewels
+            const jewelColor = '#EF4444'; // Red
+            const jewels = [
+                { x: -headWidth / 2, y: -crownHeight * 0.7 },
+                { x: 0, y: -crownHeight },
+                { x: headWidth / 2, y: -crownHeight * 0.7 }
+            ];
+
+            jewels.forEach(j => {
+                ctx.beginPath();
+                ctx.arc(j.x, j.y, headWidth * 0.06, 0, Math.PI * 2);
+                ctx.fillStyle = jewelColor;
+                ctx.fill();
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+
+            ctx.restore();
+        }
+
+        // Draw Red Devil Horns
+        function drawHorns(ctx, landmarks, width, height) {
+            const topHead = landmarks[10];
+            const leftTemple = landmarks[127];
+            const rightTemple = landmarks[356];
+
+            const centerX = topHead.x * width;
+            const centerY = topHead.y * height - (height * 0.02);
+            const headWidth = Math.abs(rightTemple.x - leftTemple.x) * width;
+            const hornOffset = headWidth * 0.35;
+            const hornSize = headWidth * 0.45;
+
+            // Draw Left & Right Horn
+            [-hornOffset, hornOffset].forEach((offset, idx) => {
+                ctx.save();
+                ctx.translate(centerX + offset, centerY);
+                const curveDirection = idx === 0 ? -1 : 1;
+
+                ctx.beginPath();
+                ctx.moveTo(-hornSize * 0.2, 0);
+                ctx.quadraticCurveTo(
+                    curveDirection * hornSize * 0.6, -hornSize * 0.6,
+                    curveDirection * hornSize * 0.4, -hornSize
+                );
+                ctx.quadraticCurveTo(
+                    0, -hornSize * 0.4,
+                    hornSize * 0.2, 0
+                );
+                ctx.closePath();
+
+                const hornGrad = ctx.createLinearGradient(0, -hornSize, 0, 0);
+                hornGrad.addColorStop(0, '#DC2626'); // Red 600
+                hornGrad.addColorStop(1, '#7F1D1D'); // Red 900
+
+                ctx.fillStyle = hornGrad;
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = '#000000';
+                ctx.stroke();
+
+                ctx.restore();
+            });
+        }
+
+        // Dark Vignette Effect for Incorrect Answer
+        function drawVignette(ctx, width, height) {
+            ctx.save();
+            const outerRadius = Math.sqrt(Math.pow(width / 2, 2) + Math.pow(height / 2, 2));
+            const vignette = ctx.createRadialGradient(
+                width / 2, height / 2, width * 0.3,
+                width / 2, height / 2, outerRadius
+            );
+            vignette.addColorStop(0, 'rgba(0,0,0,0)');
+            vignette.addColorStop(0.7, 'rgba(180,0,0,0.3)');
+            vignette.addColorStop(1, 'rgba(50,0,0,0.85)');
+
+            ctx.fillStyle = vignette;
+            ctx.fillRect(0, 0, width, height);
+            ctx.restore();
+        }
+
+        // Trigger Confetti Celebration
+        function triggerConfetti() {
+            if (typeof confetti === 'function') {
+                confetti({
+                    particleCount: 80,
+                    spread: 70,
+                    origin: { y: 0.6 }
+                });
+            }
+        }
+
+        // ================= 5. Game Logic & Flow =================
+        function updateUI() {
+            const currentItem = VOCAB_LIST[currentIndex];
+            currentQuestionEl.innerText = currentIndex + 1;
+            totalQuestionsEl.innerText = VOCAB_LIST.length;
+            scoreEl.innerText = score;
+
+            vocabWordEl.innerText = currentItem.en;
+            vocabTranslationEl.innerText = currentItem.th;
+
+            // Reset Meter
+            meterBarEl.style.width = '0%';
+            meterBarEl.className = "h-full w-0% bg-gradient-to-r from-emerald-400 to-green-500 rounded-full transition-all duration-500 shadow-sm";
+            accuracyTextEl.innerText = '0%';
+            speechRecognizedEl.innerText = '';
+            speechRecognizedEl.classList.add('hidden');
+
+            // Reset AR
+            currentARState = 'none';
+        }
+
+        function startQuestionFlow() {
+            updateUI();
+            
+            // Step 2: Countdown 3..2..1
+            let count = 3;
+            statusBadgeEl.className = "px-6 py-2 rounded-full text-base font-medium shadow-sm transition-all duration-300 bg-amber-100 text-amber-700 border border-amber-300";
+            statusBadgeEl.innerText = `เตรียมตัว... (${count})`;
+            playSound('tick');
+
+            const timer = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    statusBadgeEl.innerText = `เตรียมตัว... (${count})`;
+                    playSound('tick');
+                } else {
+                    clearInterval(timer);
+                    startSpeakingPhase();
+                }
+            }, 1000);
+        }
+
+        function startSpeakingPhase() {
+            // Step 3: Speak status & open mic
+            statusBadgeEl.className = "px-6 py-2 rounded-full text-base font-medium shadow-sm transition-all duration-300 bg-pink-500 text-white animate-pulse border border-pink-400";
+            statusBadgeEl.innerText = "🎙️ พูดเลย! (5 วินาที)";
+            playSound('go');
+
+            if (recognition) {
+                try {
+                    recognition.start();
+                    isListening = true;
+                } catch (e) {
+                    console.log("Recognition start error:", e);
+                }
+            }
+
+            // Step 4: 5 seconds timeout limit
+            speechTimeout = setTimeout(() => {
+                if (isListening) {
+                    if (recognition) recognition.stop();
+                    isListening = false;
+                    handleNoSpeech();
+                }
+            }, 5000);
+        }
+
+        function processSpeechResult(userSpeech) {
+            if (speechTimeout) clearTimeout(speechTimeout);
+            if (recognition) recognition.stop();
+            isListening = false;
+
+            const targetWord = VOCAB_LIST[currentIndex].en;
+            const accuracy = calculateSimilarity(userSpeech, targetWord);
+            const percentage = Math.round(accuracy * 100);
+
+            // Update Meter UI
+            accuracyTextEl.innerText = `${percentage}%`;
+            meterBarEl.style.width = `${percentage}%`;
+
+            if (percentage >= 80) {
+                // PASS
+                meterBarEl.className = "h-full bg-gradient-to-r from-emerald-400 to-green-500 rounded-full transition-all duration-500 shadow-sm";
+                statusBadgeEl.className = "px-6 py-2 rounded-full text-base font-semibold shadow-sm bg-emerald-500 text-white border border-emerald-400";
+                statusBadgeEl.innerText = "✨ ถูกต้อง! สุโก้ย!";
+                
+                score++;
+                scoreEl.innerText = score;
+                currentARState = 'crown';
+                
+                playSound('correct');
+                triggerConfetti();
+            } else {
+                // FAIL
+                meterBarEl.className = "h-full bg-gradient-to-r from-red-500 to-rose-600 rounded-full transition-all duration-500 shadow-sm";
+                statusBadgeEl.className = "px-6 py-2 rounded-full text-base font-semibold shadow-sm bg-rose-500 text-white border border-rose-400";
+                statusBadgeEl.innerText = "❌ ยังไม่ถูกต้อง ลองใหม่น้า";
+                
+                currentARState = 'horns';
+                playSound('wrong');
+            }
+
+            // Display result for 3 seconds then go to next question
+            setTimeout(() => {
+                nextQuestion();
+            }, 3000);
+        }
+
+        function handleNoSpeech() {
+            statusBadgeEl.className = "px-6 py-2 rounded-full text-base font-semibold shadow-sm bg-amber-400 text-slate-800 border border-amber-300";
+            statusBadgeEl.innerText = "⚠️ ไม่ได้ยินเสียงเลย ลองอีกครั้งนะ!";
+            
+            playSound('warning');
+
+            // Wait 2.5 seconds and restart current question countdown
+            setTimeout(() => {
+                startQuestionFlow();
+            }, 2500);
+        }
+
+        function nextQuestion() {
+            currentIndex++;
+            if (currentIndex < VOCAB_LIST.length) {
+                startQuestionFlow();
+            } else {
+                showEndScreen();
+            }
+        }
+
+        function showEndScreen() {
+            endScreenEl.classList.remove('hidden');
+            document.getElementById('final-score').innerText = score;
+
+            const endEmojiEl = document.getElementById('end-emoji');
+            const endTitleEl = document.getElementById('end-title');
+            const endMessageEl = document.getElementById('end-message');
+
+            if (score >= 8) {
+                endEmojiEl.innerText = '🏆';
+                endTitleEl.innerText = 'สุดยอดมากๆ เลย!';
+                endMessageEl.innerText = 'คุณได้เป็นเจ้าแห่งคำศัพท์ภาษาอังกฤษแล้ว ⭐';
+                playSound('fanfare');
+                triggerConfetti();
+            } else {
+                endEmojiEl.innerText = '💪';
+                endTitleEl.innerText = 'พยายามได้ดีมาก!';
+                endMessageEl.innerText = 'หมั่นฝึกฝนอีกนิด รับรองว่าได้เต็มแน่นอน!';
+                playSound('gameover');
+            }
+        }
+
+        function resetGame() {
+            currentIndex = 0;
+            score = 0;
+            currentARState = 'none';
+            endScreenEl.classList.add('hidden');
+            startQuestionFlow();
+        }
+
+        // ================= 6. Event Listeners & Initialize =================
+        btnStart.addEventListener('click', async () => {
+            playSound('click');
+            
+            try {
+                // Request Camera & Microphone Permissions
+                await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                
+                startScreenEl.classList.add('hidden');
+
+                // Initialize Audio & Speech Recognition
+                initAudioContext();
+                setupSpeechRecognition();
+
+                // Setup & Start MediaPipe Camera
+                setupMediaPipe();
+                await camera.start();
+
+                // Start first question
+                startQuestionFlow();
+
+            } catch (err) {
+                console.error("Permission error:", err);
+                alert("กรุณายินยอมให้สิทธิการใช้งานกล้องและไมโครโฟนเพื่อเล่นเกมครับ");
+            }
+        });
+
+        btnRestart.addEventListener('click', () => {
+            playSound('click');
+            resetGame();
+        });
+
+    </script>
+</body>
+</html>
